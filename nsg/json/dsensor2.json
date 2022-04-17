@@ -1,0 +1,20 @@
+{
+  "contour" : {
+    "min_area": 900,
+    "arcRate": 0.012
+  },
+  "state" : {
+    "start_x" : 0,
+    "step_width" : 25,
+    "recycle_count": 25,
+    "cThHold" : 600
+  },
+  "path" : {
+    "f_path" : "/home/mgt-pc2/works/MAVIZ/ply"
+  },
+  "speed" : {
+    "fps" : 6,
+    "px2m" : 0.0099,
+    "ms2kmh" : 3.6
+  }
+}

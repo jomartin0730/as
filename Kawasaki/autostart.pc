@@ -1,0 +1,354 @@
+.PROGRAM autostart.pc() #0;fursys 220330
+	SIGNAL -2001 ;Robot connection flag
+	SIGNAL -2002 ;socket close flag
+	SIGNAL -2003 ;motion flag
+
+	;SIGNAL -5 ;paint_signal
+	;SIGNAL -9 ;buzzer
+	;SIGNAL -10 ;red_siganl
+	;SIGNAL -11 ;yellow_signal
+	;SIGNAL -12 ;green_signal
+  
+	port = 9999
+	ip[1] = 192
+	ip[2] = 168
+	ip[3] = 0
+	;ip[4] = 101
+	ip[4] = 102  
+	
+	max_length = 255
+	tout_open = 60
+	tout_rec = 60
+	tout = 60
+	mode_code = 0
+	state_code = 0
+	queue_size = 0
+	;queue_count = 0
+	moiton_count = 0
+	
+	AUTOSTART2.pc ON
+	ERRSTART.pc ON
+
+	WAIT SWITCH(POWER )
+	
+	SIGNAL -9 ;buzzer
+	SIGNAL 10 ;red_siganl
+	SIGNAL -11 ;yellow_signal
+	SIGNAL -12 ;green_signal
+	
+	WHILE TRUE DO
+		ret = 0
+		PRINT 0: "open_socket(Robot Client)!!" ;연결되어 있는 모든 터미널 선택
+		CALL open_socket;소켓 연결
+		
+		IF sock_id<0 THEN   ;소켓id가 0보다 작으면 종료
+		    SIGNAL -2001
+		    SIGNAL -2002
+		ELSE
+			IF mode_code==0 THEN
+				PRINT 0: "mode_code ----- 1"
+				MC EXECUTE motion_start
+				state_code = 0
+				SIGNAL -2003
+				mode_code = 1
+			END
+			CALL send_robot
+		END
+		
+		WHILE SIG(2001) DO
+			CALL recv
+			IF ret<0 THEN
+				SIGNAL 2002
+				SIGNAL -2001
+			END
+		END
+		
+		IF SIG(2002) THEN
+			CALL close_socket
+			state_code = 0
+			SIGNAL -2003
+			SIGNAL -2002
+		END
+				
+	END
+exit_end:
+	MC ABORT
+.END
+
+.PROGRAM autostart2.pc()
+	WAIT SWITCH(POWER )
+	PRINT 0: "Autostart2"
+restart:
+	WAIT SWITCH (POWER) == FALSE
+	
+	IF SWITCH(POWER) == FALSE THEN ; 비상정지시 황색 점등
+		PRINT 0: "autostart2_EMG!!"
+		SIGNAL -9 ;buzzer
+		SIGNAL -10 ;red_siganl
+		SIGNAL 11 ;yellow_signal
+		SIGNAL -12 ;green_signal
+		$data = "Y"
+		CALL send($data)
+		GOTO restart
+	END
+.END
+
+.PROGRAM ERRSTART.pc()
+   WAIT SWITCH (POWER)
+
+	PRINT 0: "Error!!"
+	SIGNAL -9 ;buzzer
+	SIGNAL -10 ;red_siganl
+	SIGNAL 11 ;yellow_signal
+	SIGNAL -12 ;green_signal	
+	$data = "Y"
+	CALL send($data)
+.END
+
+.PROGRAM send_robot() #343
+	CALL send("ROBOT")
+	IF sret<0 THEN   ;eret -> sret
+		SIGNAL 2002
+		SIGNAL -2001 ;Robot_Connection_Signal
+	ELSE
+		PRINT 0: "Robot_Connection_SIGNAL +++2001(Robot Client)"
+		SIGNAL -2002
+		SIGNAL 2001
+		$data = "R"
+		CALL send($data)
+	END
+.END
+
+.PROGRAM open_socket() #32694
+	er_count = 0 ; error_count
+	
+connect:
+	TCP_CONNECT sock_id,port,ip[1],tout_open 
+	
+	IF sock_id<0 THEN    ;sock 접속 에러
+		IF er_count>=60 THEN
+			PRINT 0: "CAN\'T CONNECT TO PC! (CONNECT)."
+		ELSE
+			er_count = er_count+1
+			PRINT 0: "TCP_CONNECT error id = ",sock_id," error count = ",er_count
+			SIGNAL -9 ;buzzer
+			SIGNAL -10 ;red_siganl
+			SIGNAL 11 ;yellow_signal
+			SIGNAL -12 ;green_signal
+			;$data = "Y"
+			;CALL send($data)
+			GOTO connect			
+		END
+		
+	ELSE     ;정상 반환
+		PRINT 0: "TCP_CONNECT OK id = ",sock_id
+		SIGNAL -9 ;buzzer
+		SIGNAL 10 ;red_siganl
+		SIGNAL -11 ;yellow_signal
+		SIGNAL -12 ;green_signal
+
+	END
+	er_count = 0
+.END
+
+.PROGRAM close_socket() #1643
+	;PRINT 0: " close_socket(Robot Client) start"
+	TCP_CLOSE ret,sock_id
+	IF ret<0 THEN
+		PRINT 0: "TCP_CLOSE error ERROR = (",ret,")",$ERROR(ret)
+		TCP_CLOSE ret1,sock_id
+		IF ret1<0 THEN
+			PRINT 0: "TCP_CLOSE error id = ",sock_id
+		END
+	ELSE
+		PRINT 0: "TCP_CLOSE OK id = ",sock_id
+	END
+.END
+
+.PROGRAM motion_start() #0
+	SPEED 1600 MM/S ALWAYS
+	ACCURACY 20 ALWAYS
+	PRINT 0: " motion start"
+	
+	SIGNAL -9 ;buzzer
+	SIGNAL 10 ;red_siganl
+	SIGNAL -11 ;yellow_signal
+	SIGNAL -12 ;green_signal
+	$data = "R"
+	CALL send($data)
+			
+	WHILE TRUE DO
+		IF SIG(2003) THEN ;로봇 move 가능한 상태
+			IF state_code==1 THEN
+				FOR i = 0 TO queue_size-1
+					IF cmd_speed[i]==0 THEN
+						TWAIT 0.4
+					ELSE
+						SPEED cmd_speed[i] S ALWAYS
+						;SPEED cmd_speed[i] ALWAYS
+						IF $cmd_movemode[i]=="J" THEN
+							JMOVE #path_val[i]
+						ELSE
+							LMOVE #path_val[i]
+						END
+					END
+					IF cmd_nozzel[i]==1 THEN
+						SIGNAL 5
+					ELSE
+						SIGNAL -5
+					END
+					moiton_count = moiton_count+1
+				END
+				state_code = 2
+				sret = 0
+				IF moiton_count==queue_size THEN
+					PRINT 0: "1_m_count =",moiton_count," q_size =", queue_size
+					;queue_count = queue_size
+					$data = $ENCODE(/L,moiton_count)
+					moiton_count = 0
+					queue_size = 0
+					CALL send($data)
+					$data2 = "G"
+					CALL send($data2)
+					IF sret<0 THEN
+						SIGNAL 2002
+						SIGNAL -2001
+					END
+				ELSE
+					PRINT 0: "2_m_count =",moiton_count," q_size =",queue_size
+					moiton_count = 0
+					IF moiton_count>queue_size THEN
+						queue_size = 0
+					END
+				END
+			END
+			IF state_code==-1 THEN
+				SPEED 100 ALWAYS
+				HOME
+			END
+			SIGNAL -2003
+		END
+		
+	END
+	PRINT 0: " motion end"
+.END
+
+.PROGRAM recv() #2378196
+	.num = 0
+	TCP_RECV ret,sock_id,$recv_buf[0],.num,tout_rec,max_length ;max_length=255
+	IF ret<0 THEN   ;에러일 경우
+		PRINT 0: "TCP_RECV ERROR! return num =  ",ret," num= ",.num
+	ELSE     ;정상반환일 경우
+		IF .num>0 THEN
+			$cmd_str = $recv_buf[0]
+			$cmd[0] = $MID($cmd_str,1,1)
+			$cmd[1] = $MID($cmd_str,2,1)
+			$cmd[2] = $MID($cmd_str,3,55)
+	  
+			IF $cmd[0]=="R" THEN  ;run 	
+				state_code = 1 ;command receive state
+				CALL cmd_queue($cmd[1],$cmd[2])
+				IF queue_size==1 THEN
+					SIGNAL 2003
+					SIGNAL -9 ;buzzer
+					SIGNAL -10 ;red_siganl
+					SIGNAL -11 ;yellow_signal
+					SIGNAL 12 ;green_signal
+				END
+				GOTO recv_exit
+			END
+		  
+			;IF $cmd[0]=="E" THEN
+			;	state_code = 1
+			;	queue_size = queue_count
+			;	moiton_count = 0
+			;	SIGNAL 2003
+			;	GOTO recv_exit
+			;END
+		  
+			IF $cmd[0]=="B" THEN ; 비상정지
+				BRAKE
+				state_code = 0
+				moiton_count = 0
+				queue_size = 0
+				SIGNAL -2003
+				SIGNAL -5
+				SIGNAL -9 ;buzzer
+				SIGNAL -10 ;red_siganl
+				SIGNAL 11;yellow_signal
+				SIGNAL -12 ;green_signal
+				$data = "Y"
+				CALL send($data)
+				GOTO recv_exit
+			END
+		  
+			IF $cmd[0]=="H" THEN ; 홈포지션
+				BRAKE
+				state_code = -1
+				moiton_count = 0
+				queue_size = 0
+				SIGNAL 2003
+				SIGNAL -5
+				SIGNAL -9 ;buzzer
+				SIGNAL 10 ;red_siganl
+				SIGNAL -11 ;yellow_signal
+				SIGNAL -12 ;green_signal
+				$data = "R"
+				CALL send($data)
+				GOTO recv_exit
+			END
+		  
+			IF $cmd[0]=="1" THEN
+				PRINT 0: "->> Gun On"
+				SIGNAL 5
+				GOTO recv_exit
+			END
+		  
+			IF $cmd[0]=="2" THEN
+				PRINT 0: "->> Gun Off"
+				SIGNAL -5
+				GOTO recv_exit
+			END
+		END
+		
+    END
+recv_exit:
+;PRINT 0: "clear recv buffer"
+    $recv_buf[0] = ""
+.END
+
+.PROGRAM send(.$data) #3362
+	$send_buf[1] = .$data
+	buf_n = 1
+	TCP_SEND sret,sock_id,$send_buf[1],buf_n,tout
+	IF sret<0 THEN    ;에러일경우
+		PRINT 0: "TCP_SEND ERROR! return num =",sret
+	ELSE
+		;PRINT 0: "TCP_SEND OK return num = ",sret
+	END
+.END
+
+.PROGRAM home() #0
+	SPEED 100 ALWAYS
+	TWAIT 0.1
+	HOME
+.END
+
+.PROGRAM cmd_queue(.$cmd_movedata,.$cmd_posdata) #13470
+	.j0 = VAL($MID(.$cmd_posdata,1,8))
+	.j1 = VAL($MID(.$cmd_posdata,9,8))
+	.j2 = VAL($MID(.$cmd_posdata,17,8))
+	.j3 = VAL($MID(.$cmd_posdata,25,8))
+	.j4 = VAL($MID(.$cmd_posdata,33,8))
+	.j5 = VAL($MID(.$cmd_posdata,41,8))
+	cmd_nozzel[queue_size] = VAL($MID(.$cmd_posdata,49,1))
+	cmd_speed[queue_size] = VAL($MID(.$cmd_posdata,50,3))
+	;cmd_speed[queue_size] = VAL($MID(.$cmd_posData,50,2)) ;S = 3 / % = 2
+	$cmd_movemode[queue_size] = $MID(.$cmd_movedata,1,1)
+	;PRINT 0:"cmd_speed =",cmd_speed[queue_size]
+	;PRINT 0:".cmd_posData =",.$cmd_posData
+	;PRINT 0:".j0 =",.j0," .j1 =",.j1," .j2 =",.j2," .j3 =",.j3," .j4 =",.j4," .j5 =",.j5
+	POINT #path_val[queue_size] = #PPOINT(.j0,.j1,.j2,.j3,.j4,.j5)
+	queue_size = queue_size+1
+.END
+

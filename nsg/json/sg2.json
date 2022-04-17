@@ -1,0 +1,9 @@
+{
+  "connect" : {
+    "ip": "192.168.0.102",
+    "port" : 49153
+  },
+  "path" : {
+    "cur_path" : "/home/mgt-pc1/works/MAVIZ/ply/"
+  }
+}
